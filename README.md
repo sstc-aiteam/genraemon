@@ -7,5 +7,6 @@
 
 
 ## References
+* [WAN 2.2 SUPER FAST Local Video Ai](https://www.youtube.com/watch?v=geSIepK8ekQ)
 * [ComfyUI Tutorial Series: Ep10 - Flux GGUF and Custom Nodes](https://www.youtube.com/watch?v=Ym0oJpRbj4U)
 * [AI 繪圖的終極沙盒 ComfyUI 快速上手](https://www.youtube.com/watch?v=bbuspQWHt9w)
