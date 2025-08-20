@@ -9,6 +9,7 @@
 ## References
 * [WAN 2.2 SUPER FAST Local Video Ai](https://www.youtube.com/watch?v=geSIepK8ekQ)
 * [WAN 2.1 Installation – Turn Text & Images into Video](https://www.youtube.com/watch?v=v2Eu72JVDsQ&t=14s)
+* [Master Flux Kontext – Inpainting, Editing & Character Consistency](https://www.youtube.com/watch?v=9-onDeEWWvU)
 * [Flux GGUF and Custom Nodes](https://www.youtube.com/watch?v=Ym0oJpRbj4U)
-  * [Github city96/ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF)  
+  * [Github city96/ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF)
 * [AI 繪圖的終極沙盒 ComfyUI 快速上手](https://www.youtube.com/watch?v=bbuspQWHt9w)
