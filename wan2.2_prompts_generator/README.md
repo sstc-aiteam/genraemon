@@ -1,5 +1,4 @@
 TOC
-
 - Workflow
 - Prompt Generator Request
   - Gemini Prompt Instruction Template
