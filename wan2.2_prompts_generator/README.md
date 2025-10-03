@@ -1,6 +1,6 @@
 TOC
 - Workflow
-- Prompt Generator Request
+- [Prompt Generator Request](#prompt-generator-request)
   - Gemini Prompt Instruction Template
   - GPT Prompt Instruction Template
 
