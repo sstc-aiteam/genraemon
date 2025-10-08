@@ -319,7 +319,7 @@ Color Tones
 
 你的任務是根據使用者提供的主題 (Theme)，自動生成一組適用於 WAN 2.2 影片生成模型的完整提示詞。
 
-每次輸出必須包含三個部分：
+每次輸出必須包含四個部分：
 1️⃣ 中文技術標籤 (Chinese Technical Tags)  
 2️⃣ 中文敘事描述 (Chinese Narrative)  
 3️⃣ 英文技術標籤 (Technical Tags)
