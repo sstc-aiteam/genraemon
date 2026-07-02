@@ -185,6 +185,13 @@ for scene in narrations:
 xfade offset = 前段影片累計時長 - 0.3 秒。
 最終輸出 pixel format 為 yuv420p。
 
+**重要：音訊絕不可用 `concat` 直接串接。**
+`xfade` 讓每次轉場重疊 0.3 秒，最終影片總長 = Σ影片時長 - (n-1)×0.3 秒；
+但 `concat` 對音訊是首尾相接、完全不重疊，音訊總長 = Σ影片時長，比影片多出 (n-1)×0.3 秒，
+且誤差每經過一次轉場就多累加 0.3 秒（分鏡 5 = 4 次轉場 → 累積 1.2 秒），導致後段影片與旁白對不齊。
+正確做法是音訊也使用與 `xfade` **相同的 offset** 做 `adelay` 延遲後以 `amix` 混音（而非 `concat`），
+讓每段音訊在最終時間軸上的起始點與對應分鏡影片的起始點完全一致。
+
 ```python
 n = len(narrations)
 narrated_videos = [f"storyboard_narrated_{i+1:02d}.mp4" for i in range(n)]
@@ -203,24 +210,31 @@ else:
     for v in narrated_videos:
         input_args += ["-i", v]
 
-    # Build xfade filter chain for video
-    # Build concat filter for audio
     filter_parts = []
-    current_offset = 0.0
 
-    # Video xfade chain
+    # Video xfade chain; also record each clip's start offset on the
+    # final timeline so audio can be aligned to the same points.
+    video_offsets = [0.0]
+    current_offset = 0.0
     prev_label = "[0:v]"
     for i in range(1, n):
         current_offset += durations[i - 1] - TRANSITION_DUR
+        video_offsets.append(current_offset)
         out_label = f"[v{i}]" if i < n - 1 else "[vout]"
         filter_parts.append(
             f"{prev_label}[{i}:v]xfade=transition=fade:duration={TRANSITION_DUR}:offset={current_offset:.6f}{out_label}"
         )
         prev_label = out_label
 
-    # Audio concat (simple concat, no crossfade needed since audio is TTS only)
-    audio_inputs = "".join(f"[{i}:a]" for i in range(n))
-    filter_parts.append(f"{audio_inputs}concat=n={n}:v=0:a=1[aout]")
+    # Audio: delay each track to its clip's start offset (same offsets as
+    # xfade above), then mix -- NOT concat. concat ignores the 0.3s overlap
+    # that xfade removes from the video, so it would drift out of sync by
+    # TRANSITION_DUR at every transition (cumulative across scenes).
+    for i in range(n):
+        delay_ms = round(video_offsets[i] * 1000)
+        filter_parts.append(f"[{i}:a]adelay={delay_ms}|{delay_ms}[a{i}]")
+    audio_labels = "".join(f"[a{i}]" for i in range(n))
+    filter_parts.append(f"{audio_labels}amix=inputs={n}:duration=longest:normalize=0[aout]")
 
     filter_complex = "; ".join(filter_parts)
 
@@ -369,10 +383,15 @@ else:
         input_args += ["-i", v]
 
     filter_parts = []
+
+    # Video xfade chain; record each clip's start offset on the final
+    # timeline (needed to align audio to the same points below).
+    video_offsets = [0.0]
     current_offset = 0.0
     prev_label = "[0:v]"
     for i in range(1, n):
         current_offset += durations[i - 1] - TRANSITION_DUR
+        video_offsets.append(current_offset)
         out_label = f"[v{i}]" if i < n - 1 else "[vout]"
         filter_parts.append(
             f"{prev_label}[{i}:v]xfade=transition=fade:duration={TRANSITION_DUR}"
@@ -380,8 +399,16 @@ else:
         )
         prev_label = out_label
 
-    audio_inputs = "".join(f"[{i}:a]" for i in range(n))
-    filter_parts.append(f"{audio_inputs}concat=n={n}:v=0:a=1[aout]")
+    # Audio: adelay each track to its clip's start offset, then amix.
+    # NOT concat -- xfade removes TRANSITION_DUR of video at every
+    # transition, so a plain audio concat drifts later by TRANSITION_DUR
+    # per transition (cumulative), pushing narration out of sync with
+    # the video the more scenes there are.
+    for i in range(n):
+        delay_ms = round(video_offsets[i] * 1000)
+        filter_parts.append(f"[{i}:a]adelay={delay_ms}|{delay_ms}[a{i}]")
+    audio_labels = "".join(f"[a{i}]" for i in range(n))
+    filter_parts.append(f"{audio_labels}amix=inputs={n}:duration=longest:normalize=0[aout]")
 
     cmd = [
         "ffmpeg", "-y", *input_args,
@@ -426,8 +453,9 @@ print(f"[DONE] Narrated panels: storyboard_narrated_01.mp4 ~ storyboard_narrated
 3. **片頭靜音**：每段分鏡旁白從 0.3 秒後才開始，不覆蓋片頭
 4. **僅保留 TTS**：合成後的分鏡影片只含 Edge-TTS 旁白，移除原片聲音
 5. **轉場 0.3 秒**：串接時每段之間加入 0.3 秒 fade 轉場
-6. **yuv420p**：最終輸出必須通過 ffprobe 驗證 pix_fmt=yuv420p
-7. **保留程式碼**：`storyboard_narration.py` 執行後不刪除
+6. **音訊不可用 concat 串接**：`xfade` 使影片總長縮短 (n-1)×0.3 秒，音訊必須用與 `xfade` 相同的 offset 做 `adelay` 後 `amix` 混音，禁止用 `concat`（會逐段累積 0.3 秒偏移，導致旁白與畫面不同步）
+7. **yuv420p**：最終輸出必須通過 ffprobe 驗證 pix_fmt=yuv420p
+8. **保留程式碼**：`storyboard_narration.py` 執行後不刪除
 
 ---
 
