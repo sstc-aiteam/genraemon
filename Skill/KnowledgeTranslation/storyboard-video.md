@@ -19,6 +19,41 @@ description: |
 
 ---
 
+## 輸出目錄規則（所有 storyboard 技能共用）
+
+本技能產生的**所有檔案**（`storyboard_video.py`、各分鏡 `storyboard_video_XX.mp4`…）
+以及讀取的輸入圖卡（`storyboard_panel_XX.jpg`），都位於與 storyboard-design 相同的**共用資料夾**內。
+
+- 基底名稱為 `storyboard`；若已存在則以連號尾數區分：`storyboard001`、`storyboard002`、…
+- 本技能屬於**下游技能**，沿用**最新**的既有資料夾（`create_new=False`）。
+- 作法：先解析出共用資料夾，將 `storyboard_video.py` 寫入該資料夾，
+  腳本開頭 `os.chdir()` 至自身所在目錄，之後所有相對路徑（圖卡、影片）都會落在該資料夾內。
+
+```python
+import re
+from pathlib import Path
+
+def resolve_storyboard_dir(create_new=False):
+    base = Path("storyboard")
+    existing = []
+    if base.is_dir():
+        existing.append((0, base))
+    for p in sorted(Path(".").glob("storyboard[0-9][0-9][0-9]")):
+        if p.is_dir():
+            existing.append((int(p.name[len("storyboard"):]), p))
+    existing.sort(key=lambda t: t[0])
+    if create_new:
+        target = base if not existing else Path(f"storyboard{existing[-1][0] + 1:03d}")
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    if existing:
+        return existing[-1][1]
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+```
+
+---
+
 ## xAI Video API 正確行為（實測確認）
 
 | 項目 | 正確值 |
@@ -71,7 +106,16 @@ if not os.environ.get("XAI_API_KEY"):
 
 ### Step 4：建立共通風格描述（Style Prefix）
 
-依分鏡主題選擇對應的 style prefix，確保所有影片畫風一致：
+**優先讀取共用設計系統：** 先檢查共用 storyboard 資料夾內是否存在
+`storyboard_style.json`（由 storyboard-style 技能產生）。若存在，直接使用其
+`global_style_prompt` 作為 STYLE_PREFIX，**不再依主題自行判斷**——這確保影片與
+storyboard-image 產出的圖卡套用完全相同的美術風格與色票，不會出現圖卡走寫實
+HUD、影片卻套用 flat 2D vector 前綴的衝突。若檔案不存在（使用者未執行
+storyboard-style），才依下列主題分類表自行判斷，並可在完成後提醒使用者：
+「建議先執行 storyboard-style 統一設計系統，讓圖卡與影片風格一致。」
+
+**找不到 storyboard_style.json 時的備援邏輯：** 依分鏡主題選擇對應的 style
+prefix，確保所有影片畫風一致：
 
 **教育／科學類（預設）：**
 ```
@@ -123,9 +167,15 @@ any on-screen text must use Traditional Chinese characters only, no Simplified C
 
 ```python
 import os
+import json
 import time
 import base64
 import requests
+from pathlib import Path
+
+# Switch to the script's own directory (the shared storyboard folder) so all
+# input images and output videos live in the same folder.
+os.chdir(Path(__file__).resolve().parent)
 
 XAI_API_KEY = os.environ.get("XAI_API_KEY")
 if not XAI_API_KEY:
@@ -143,11 +193,29 @@ HEADERS = {
 RESOLUTION = "480p"
 RESOLUTION_FALLBACK = {"480p": "720p", "720p": "1080p"}
 
-STYLE_PREFIX = (
-    "flat design infographic animation, clean white background, simple geometric shapes, "
-    "unified blue-green color palette, minimal labels in Traditional Chinese, "
-    "storyboard panel aesthetic, non-realistic style, 2D vector art animation"
-)
+# --- Design system: load storyboard_style.json produced by the storyboard-style
+# skill (single source of truth shared with storyboard-image). Falls back to the
+# original hardcoded default when the file is absent (skill was skipped). ---
+STYLE_SPEC_PATH = Path("storyboard_style.json")
+if STYLE_SPEC_PATH.exists():
+    try:
+        _style_spec = json.loads(STYLE_SPEC_PATH.read_text(encoding="utf-8"))
+        STYLE_PREFIX = _style_spec["global_style_prompt"]
+        print(f"[Style] Loaded storyboard_style.json (family={_style_spec['art_style']['family']})")
+    except Exception as e:
+        print(f"  [WARN] Failed to load storyboard_style.json ({e}), using fallback style")
+        STYLE_PREFIX = None
+else:
+    print("  [WARN] storyboard_style.json not found. Run storyboard-style first for "
+          "consistent image/video styling. Falling back to local default.")
+    STYLE_PREFIX = None
+
+if not STYLE_PREFIX:
+    STYLE_PREFIX = (
+        "flat design infographic animation, clean white background, simple geometric shapes, "
+        "unified blue-green color palette, minimal labels in Traditional Chinese, "
+        "storyboard panel aesthetic, non-realistic style, 2D vector art animation"
+    )
 
 TEXT_RULE = (
     "any on-screen text must use Traditional Chinese characters only, no Simplified Chinese, "
@@ -319,11 +387,13 @@ for r in results:
 
 ### Step 7：填入場景資料並執行
 
-從對話中解析分鏡腳本，填入 `storyboard_scenes` 陣列，並依使用者選擇設定 `RESOLUTION`（`"480p"` 或 `"720p"`，未指定則保持預設 `"480p"`）後，將完整程式碼儲存為 `storyboard_video.py`，再執行：
+從對話中解析分鏡腳本，填入 `storyboard_scenes` 陣列，並依使用者選擇設定 `RESOLUTION`（`"480p"` 或 `"720p"`，未指定則保持預設 `"480p"`）後，將完整程式碼儲存為**共用 storyboard 資料夾**內的 `storyboard_video.py`，再執行：
 
 ```bash
-python storyboard_video.py
+python storyboard/storyboard_video.py
 ```
+
+> 請將 `storyboard/` 替換為本次實際使用的資料夾名稱（例如 `storyboard001/`）。
 
 ---
 
@@ -347,6 +417,7 @@ python storyboard_video.py
 4. **必填 model**：每次請求都帶 `"model": "grok-imagine-video"`
 5. **保留程式碼**：`storyboard_video.py` 執行後不刪除
 6. **逐鏡儲存**：每段影片獨立為 MP4 檔案，方便後製
+7. **共用資料夾**：所有輸入圖卡與輸出影片、程式碼均存放於共用 storyboard 資料夾（`storyboard`／`storyboardNNN`）內
 
 ---
 
@@ -354,3 +425,8 @@ python storyboard_video.py
 
 回報生成結果，並詢問使用者：
 > 「影片是否符合需求？若需要調整影片長度、重新生成特定分鏡，或修改畫風描述，請告訴我。」
+
+若生成時發現共用資料夾內沒有 `storyboard_style.json`（本技能是以局部主題判斷生成 STYLE_PREFIX），
+額外提醒使用者：
+> 「這次影片是用本技能內建的主題風格判斷生成的。若圖卡與影片風格看起來不一致，
+> 建議先執行 storyboard-style 技能建立共用設計系統，重新生成後圖卡與影片會套用同一套風格。」

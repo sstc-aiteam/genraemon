@@ -20,6 +20,42 @@ description: |
 
 ---
 
+## 輸出目錄規則（所有 storyboard 技能共用）
+
+本技能產生的**所有檔案**（`storyboard_bgm.py`、`bgm_segment_XX.wav`、`bgm_raw.wav`、
+`storyboard_bgm.wav`、`storyboard_final_bgm.mp4`…）以及讀取的輸入影片
+（`storyboard_final.mp4`），都位於與 storyboard-design 相同的**共用資料夾**內。
+
+- 基底名稱為 `storyboard`；若已存在則以連號尾數區分：`storyboard001`、`storyboard002`、…
+- 本技能屬於**下游技能**，沿用**最新**的既有資料夾（`create_new=False`）。
+- 作法：將 `storyboard_bgm.py` 寫入該資料夾，腳本開頭 `os.chdir()`
+  至自身所在目錄，之後所有相對路徑（音檔、影片）都會落在該資料夾內。
+
+```python
+import re
+from pathlib import Path
+
+def resolve_storyboard_dir(create_new=False):
+    base = Path("storyboard")
+    existing = []
+    if base.is_dir():
+        existing.append((0, base))
+    for p in sorted(Path(".").glob("storyboard[0-9][0-9][0-9]")):
+        if p.is_dir():
+            existing.append((int(p.name[len("storyboard"):]), p))
+    existing.sort(key=lambda t: t[0])
+    if create_new:
+        target = base if not existing else Path(f"storyboard{existing[-1][0] + 1:03d}")
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    if existing:
+        return existing[-1][1]
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+```
+
+---
+
 ## 步驟流程
 
 ### Step 1：確認環境
@@ -117,6 +153,10 @@ import requests
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
+
+# Switch to the script's own directory (the shared storyboard folder) so the
+# input video and all output audio/videos live in the same folder.
+os.chdir(Path(__file__).resolve().parent)
 
 # -------------------------------------------------------------------
 # Configuration
@@ -357,8 +397,11 @@ Suitable as background music for an educational documentary video.
 
 **5c. 儲存並執行**
 
+將 `storyboard_bgm.py` 儲存至**共用 storyboard 資料夾**內後執行
+（`storyboard/` 替換為實際資料夾名稱）：
+
 ```bash
-python storyboard_bgm.py
+python storyboard/storyboard_bgm.py
 ```
 
 若缺少套件：
@@ -389,6 +432,7 @@ pip install requests
 5. **yuv420p**：最終輸出影片視訊流以 `-c:v copy` 保留原始編碼，僅重新編碼音軌
 6. **保留程式碼**：`storyboard_bgm.py` 執行後不刪除
 7. **無 Emoji 日誌**：所有 `print()` 與程式碼註解一律使用純文字標籤
+8. **共用資料夾**：輸入影片與所有輸出音檔、影片、程式碼均存放於共用 storyboard 資料夾（`storyboard`／`storyboardNNN`）內
 
 ---
 

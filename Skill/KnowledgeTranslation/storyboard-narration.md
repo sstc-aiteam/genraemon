@@ -20,6 +20,42 @@ description: |
 
 ---
 
+## 輸出目錄規則（所有 storyboard 技能共用）
+
+本技能產生的**所有檔案**（`storyboard_narration.py`、`narration_XX.mp3`、
+`storyboard_narrated_XX.mp4`、`storyboard_final.mp4`…）以及讀取的輸入分鏡影片
+（`storyboard_video_XX.mp4`），都位於與 storyboard-design 相同的**共用資料夾**內。
+
+- 基底名稱為 `storyboard`；若已存在則以連號尾數區分：`storyboard001`、`storyboard002`、…
+- 本技能屬於**下游技能**，沿用**最新**的既有資料夾（`create_new=False`）。
+- 作法：將 `storyboard_narration.py` 寫入該資料夾，腳本開頭 `os.chdir()`
+  至自身所在目錄，之後所有相對路徑（音檔、影片）都會落在該資料夾內。
+
+```python
+import re
+from pathlib import Path
+
+def resolve_storyboard_dir(create_new=False):
+    base = Path("storyboard")
+    existing = []
+    if base.is_dir():
+        existing.append((0, base))
+    for p in sorted(Path(".").glob("storyboard[0-9][0-9][0-9]")):
+        if p.is_dir():
+            existing.append((int(p.name[len("storyboard"):]), p))
+    existing.sort(key=lambda t: t[0])
+    if create_new:
+        target = base if not existing else Path(f"storyboard{existing[-1][0] + 1:03d}")
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    if existing:
+        return existing[-1][1]
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+```
+
+---
+
 ## 步驟流程
 
 ### Step 1：確認環境
@@ -267,12 +303,18 @@ print(f"[INFO] Output: {final_output} | duration={total_dur:.2f}s | pix_fmt={pix
 
 ## 完整程式碼範本
 
-儲存為 `storyboard_narration.py`，填入旁白後執行：
+儲存為**共用 storyboard 資料夾**內的 `storyboard_narration.py`，填入旁白後執行
+（例如 `python storyboard/storyboard_narration.py`，`storyboard/` 替換為實際資料夾名稱）：
 
 ```python
 import asyncio, json, os, shutil, subprocess, sys
+from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
+
+# Switch to the script's own directory (the shared storyboard folder) so all
+# input videos and output audio/videos live in the same folder.
+os.chdir(Path(__file__).resolve().parent)
 
 try:
     import edge_tts
@@ -456,6 +498,7 @@ print(f"[DONE] Narrated panels: storyboard_narrated_01.mp4 ~ storyboard_narrated
 6. **音訊不可用 concat 串接**：`xfade` 使影片總長縮短 (n-1)×0.3 秒，音訊必須用與 `xfade` 相同的 offset 做 `adelay` 後 `amix` 混音，禁止用 `concat`（會逐段累積 0.3 秒偏移，導致旁白與畫面不同步）
 7. **yuv420p**：最終輸出必須通過 ffprobe 驗證 pix_fmt=yuv420p
 8. **保留程式碼**：`storyboard_narration.py` 執行後不刪除
+9. **共用資料夾**：所有輸入影片與輸出音檔、影片、程式碼均存放於共用 storyboard 資料夾（`storyboard`／`storyboardNNN`）內
 
 ---
 

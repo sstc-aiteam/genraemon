@@ -14,6 +14,53 @@ description: |
 
 ---
 
+## 輸出目錄規則（所有 storyboard 技能共用）
+
+本技能是整個分鏡流程的**進入點**，負責建立本次專案的輸出資料夾。
+往後 storyboard-image、storyboard-video、storyboard-narration、storyboard-bgm
+產生的**所有檔案**（`.py`、`.md`、`.jpg`、`.mp3`、`.mp4`、`.wav`…）都必須存放在**同一個資料夾**內。
+
+**資料夾命名規則：**
+- 基底名稱為 `storyboard`
+- 若 `storyboard` 已存在，則以連號尾數（三位數）區分：`storyboard001`、`storyboard002`、…
+- 每執行一次 storyboard-design（新專案），就建立一個**新的**資料夾；下游技能則沿用**最新**的既有資料夾。
+
+**目錄解析輔助函式（各技能共用；本技能使用 `create_new=True`，下游技能使用 `create_new=False`）：**
+
+```python
+import re
+from pathlib import Path
+
+def resolve_storyboard_dir(create_new=False):
+    """解析共用的 storyboard 輸出資料夾。
+    基底名稱為 'storyboard'；若已存在則使用 'storyboard001'、'storyboard002'、...
+    create_new=True  -> 回傳下一個未使用的資料夾（進入點 storyboard-design 使用）
+    create_new=False -> 回傳最新的既有資料夾（下游技能共用同一個）
+    """
+    base = Path("storyboard")
+    existing = []
+    if base.is_dir():
+        existing.append((0, base))
+    for p in sorted(Path(".").glob("storyboard[0-9][0-9][0-9]")):
+        if p.is_dir():
+            existing.append((int(p.name[len("storyboard"):]), p))
+    existing.sort(key=lambda t: t[0])
+    if create_new:
+        target = base if not existing else Path(f"storyboard{existing[-1][0] + 1:03d}")
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    if existing:
+        return existing[-1][1]
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+```
+
+**本技能的動作：** 產出分鏡腳本後，以 `resolve_storyboard_dir(create_new=True)`
+建立新資料夾，並將完整分鏡腳本另存為該資料夾下的 `storyboard_script.md`
+（供下游 storyboard-image / storyboard-video 解析使用）。請在回覆中告知使用者本次使用的資料夾名稱。
+
+---
+
 ## 步驟流程
 
 ### Step 1：讀取文件
@@ -144,5 +191,11 @@ description: |
 
 ## 完成後
 
-輸出完整分鏡腳本後，詢問使用者：
-> 「分鏡數量與內容是否符合需求？若需要調整分鏡數量（須為 3 的倍數，如 3/6/9/12/15）或修改特定分鏡，請告訴我。」
+1. 依「輸出目錄規則」以 `resolve_storyboard_dir(create_new=True)` 建立本次專案資料夾，
+   並將完整分鏡腳本另存為該資料夾下的 `storyboard_script.md`。
+2. 於回覆中明確告知使用者本次使用的資料夾名稱（例如 `storyboard`、`storyboard001`…），
+   下游技能將沿用此資料夾。
+3. 詢問使用者：
+> 「分鏡數量與內容是否符合需求？若需要調整分鏡數量（須為 3 的倍數，如 3/6/9/12/15）或修改特定分鏡，請告訴我。
+> 確認無誤後，建議接著執行 storyboard-style 建立共用設計系統（統一美術風格、色票、標題樣式），
+> 再進行 storyboard-image／storyboard-video 生成圖卡與影片，避免兩者風格各自判斷而不一致。」
