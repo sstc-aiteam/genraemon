@@ -123,9 +123,13 @@ gemini_client = None
 try:
     ensure_package("google-genai>=2.25.0", "google.genai", min_version="2.25.0")
     from google import genai
+    from google.genai import types
     if not os.environ.get("GEMINI_API_KEY"):
         raise RuntimeError("環境變數 GEMINI_API_KEY 未設定")
-    gemini_client = genai.Client()
+    # TTS 模型目前僅在 v1beta 提供；SDK 預設走 v1 會回傳 404，且此預設行為會被使用者
+    # 環境中是否設有 GOOGLE_GENAI_API_VERSION 悄悄左右，故在程式碼中明確指定 api_version，
+    # 不依賴環境變數。
+    gemini_client = genai.Client(http_options=types.HttpOptions(api_version="v1beta"))
     # 以極短文字做一次 smoke test，確認模型可正常呼叫
     _test = gemini_client.interactions.create(
         model=GEMINI_MODEL,
@@ -490,10 +494,15 @@ gemini_client = None
 try:
     ensure_package("google-genai>=2.25.0", "google.genai", min_version="2.25.0")
     from google import genai
+    from google.genai import types
 
     if not os.environ.get("GEMINI_API_KEY"):
         raise RuntimeError("GEMINI_API_KEY not set")
-    gemini_client = genai.Client()
+    # TTS models are v1beta-only right now; the SDK's v1 default 404s, and
+    # whether it resolves to v1beta instead depends on the GOOGLE_GENAI_API_VERSION
+    # env var being set in the caller's shell -- set it explicitly so this
+    # doesn't silently depend on that.
+    gemini_client = genai.Client(http_options=types.HttpOptions(api_version="v1beta"))
     _test = gemini_client.interactions.create(
         model=GEMINI_MODEL,
         input=[{"type": "user_input", "content": [{

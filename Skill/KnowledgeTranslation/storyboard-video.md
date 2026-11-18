@@ -3,10 +3,11 @@ name: storyboard-video
 description: |
   根據 storyboard-design 輸出的分鏡腳本文字稿，以及 storyboard-image 輸出的分鏡圖卡，
   以雙引擎策略為每個分鏡生成一段短影片並儲存至工作目錄：優先呼叫地端 MinMax H3
-  （ComfyUI Reference-to-Video 工作流程），失敗才 fallback 呼叫 xAI Grok Imagine Video API。
-  傳入 MinMax H3 的提示詞一律以本技能內嵌的 H3 Prompt Writing skill／Full-Reference Mode
-  六段式格式改寫（subject_definitions／summary／retention_analysis／detailed_description／
-  overall_soundscape／non_diegetic_music），不使用外部連結檔案。
+  FastH3（ComfyUI Reference-to-Video 工作流程，對應 `fastH3_ref2va.json`，固定輸出
+  Full HD 1920x1080），失敗才 fallback 呼叫 xAI Grok Imagine Video API。
+  傳入 MinMax H3 FastH3 的提示詞一律以本技能內嵌的 H3 Prompt Writing skill／
+  Full-Reference Mode 六段式格式改寫（subject_definitions／summary／retention_analysis／
+  detailed_description／overall_soundscape／non_diegetic_music），不使用外部連結檔案。
   每段影片預設 6 秒，畫面文字以繁體中文為主，禁用簡體字。
 
   當使用者提到「生成影片」、「分鏡影片」、「storyboard video」、「幫我做影片」、
@@ -21,9 +22,11 @@ description: |
 以 storyboard-design 的分鏡文字稿（畫面構圖、重點動作）與 storyboard-image 的圖卡
 作為輸入，採**雙引擎策略**逐鏡生成影片並儲存：
 
-1. **優先**：呼叫地端 MinMax H3（透過內網 ComfyUI 伺服器的 Reference-to-Video 工作流程）。
+1. **優先**：呼叫地端 MinMax H3 FastH3（透過內網 ComfyUI 伺服器的 Reference-to-Video
+   工作流程，對應 `fastH3_ref2va.json`），固定輸出 Full HD（1920x1080，16:9）。
 2. **備援**：該分鏡的 MinMax H3 呼叫失敗（伺服器無法連線、上傳失敗、執行錯誤、逾時等
-   任何例外）時，自動改呼叫 xAI Grok Imagine Video API 生成同一分鏡。
+   任何例外）時，自動改呼叫 xAI Grok Imagine Video API 生成同一分鏡（解析度依使用者
+   選擇的 480p／720p，與地端引擎固定輸出的 FHD 無關）。
 3. 切換以**單一分鏡為單位**——某一鏡 MinMax H3 失敗不影響其他鏡，其他鏡仍優先嘗試 MinMax H3。
 
 ---
@@ -63,18 +66,18 @@ def resolve_storyboard_dir(create_new=False):
 
 ---
 
-## 引擎一：MinMax H3（地端 ComfyUI）正確行為
+## 引擎一：MinMax H3 FastH3（地端 ComfyUI）正確行為
 
 | 項目 | 正確值 |
 |---|---|
 | ComfyUI 伺服器 | 讀取環境變數 `MINIMAX_SERVER_ADDRESS`（格式 `IP:Port`，例如 `192.168.x.x:8188`）；未設定時向使用者索取，不寫死於程式碼中 |
-| 使用工作流程 | Reference-to-Video (R2V) Lightning-LoRA turbo 版，節點結構對應 `video_minimax_h3_r2v_turbo.json` |
+| 使用工作流程 | Reference-to-Video (R2V) **FastH3** 8-step 蒸餾模型（`fasth3_omniref_8step_pruned_int8_convrot.safetensors`），節點結構對應 `fastH3_ref2va.json`；**固定輸出 Full HD（1920x1080，16:9）**，不受 Step 2 的 480p/720p 選項影響（該選項僅套用於 Grok 備援） |
 | 上傳參考圖 | `POST http://{server}/upload/image`（multipart，欄位名 `image`），回傳 `{"name": "..."}` 供 LoadImage 節點使用 |
 | 送出端點 | `POST http://{server}/prompt`，body 為 `{"prompt": <workflow graph>, "client_id": ...}`，回傳 `{"prompt_id": "..."}` |
 | 進度／完成 | 以 WebSocket `ws://{server}/ws?clientId=...` 監聽訊息：`type="executing", data.node=None` 代表完成；`type="execution_error"` 代表失敗 |
-| 讀取輸出 | `GET http://{server}/history/{prompt_id}`，逐一 output 找出含 `filename` 的項目，再以 `GET http://{server}/view?filename=...&subfolder=...&type=...` 下載 |
-| 關鍵節點 ID | Prompt=138、R2V=136、Resolution=115、Duration=132、Seed=129、Steps(Full)=143、Steps(LoRA)=144、LoRA開關=146、SaveVideo=92、參考圖 LoadImage=137/139/148/149/150（依序對應 ref_image_0~4） |
-| 參考圖上限 | 最多 9 張；**本技能每鏡僅使用對應的 1 張 `storyboard_panel_XX.jpg`**（wire 到 ref_image_0 = 節點 137，其餘 ref_image_1~4 的 wiring 直接刪除，避免指向不存在的 placeholder 檔案而執行失敗） |
+| 讀取輸出 | `GET http://{server}/history/{prompt_id}`，逐一 output 找出含 `filename` 的項目（`VHS_VideoCombine` 節點輸出），再以 `GET http://{server}/view?filename=...&subfolder=...&type=...` 下載 |
+| 關鍵節點 ID | Prompt=2、R2V=11、Resolution=20、Duration=17、Seed=129、VideoCombine=135、參考圖 LoadImage=214（唯一的 ref_image_0 插槽） |
+| 參考圖上限 | 本 workflow 僅有 1 個 ref_image_0 插槽，已預先 wiring 完成；**本技能每鏡使用對應的 1 張 `storyboard_panel_XX.jpg`**，無需刪除其他插槽 wiring |
 | 判定失敗 | 連線失敗、上傳失敗、`POST /prompt` 非 200、WebSocket 收到 `execution_error`、或 `/history` 最終狀態為 `error`，一律視為該分鏡 MinMax H3 失敗 -> fallback Grok |
 
 ## 引擎二：xAI Grok Imagine Video API 正確行為（實測確認）
@@ -101,16 +104,19 @@ def resolve_storyboard_dir(create_new=False):
 下載流程，均對齊 `generate_minmax_h3_r2v_video.py` 的作法：
 
 - 上傳一律用 `POST /upload/image`（ComfyUI 把它當通用「存入 input/」端點使用，圖片走這個路由）。
-- 送出前先刪除 workflow 中所有 `ref_images.ref_image_N` wiring，僅重新接上本次實際提供的參考圖，
-  避免未提供的插槽仍指向不存在的 placeholder 檔名而導致 `required_input_missing`／執行失敗。
+- 本 workflow（`fastH3_ref2va.json`）僅有單一 `ref_images.ref_image_0` 插槽且已預先 wiring，
+  只需把上傳後的檔名寫入 LoadImage 節點（214）的 `image` 欄位即可，無需像舊版 R2V Turbo
+  workflow 那樣刪除／補上多個 ref_image_N 插槽。
 - 送出用 `POST /prompt`（body 含 `prompt` 與 `client_id`），以 WebSocket `ws://{server}/ws?clientId=...`
   監聽 `executing`（`data.node=None` 代表完成）與 `execution_error`。
 - 完成後以 `GET /history/{prompt_id}` 交叉確認 `status.status_str` 不是 `"error"`，
-  再逐一掃描 outputs 找出含 `filename` 的項目，以 `GET /view` 下載。
-- 節點 ID 常數（`MM_NODE_PROMPT=138`、`MM_NODE_R2V=136`、`MM_NODE_RESOLUTION=115`、
-  `MM_NODE_DURATION=132`、`MM_NODE_SEED=129`、`MM_NODE_SAVE_VIDEO=92`、
-  `MM_REF_IMAGE_NODE_0=137`）與 `video_minimax_h3_r2v_turbo.json` 匯出檔一致，
+  再逐一掃描 outputs 找出含 `filename` 的項目（來自 `VHS_VideoCombine` 節點 135），以 `GET /view` 下載。
+- 節點 ID 常數（`MM_NODE_PROMPT=2`、`MM_NODE_R2V=11`、`MM_NODE_RESOLUTION=20`、
+  `MM_NODE_DURATION=17`、`MM_NODE_SEED=129`、`MM_NODE_VIDEO_COMBINE=135`、
+  `MM_REF_IMAGE_NODE_0=214`）與 `fastH3_ref2va.json` 匯出檔一致，
   若地端重新匯出過 workflow，需同步更新這些常數。
+- `MM_NODE_RESOLUTION` 的 `megapixels` 固定寫入 `2`（對應 16:9 下的 Full HD 1920x1080），
+  不讀取 Step 2 的 `RESOLUTION` 選項；該選項只給 Grok 備援的 `resolution` 欄位使用。
 - 每個分鏡使用獨立亂數 seed（見 Step 6 範本的 `MM_NODE_SEED` 用法），避免所有分鏡因共用同一顆
   預設 seed 而畫面雷同。
 
@@ -121,7 +127,7 @@ def resolve_storyboard_dir(create_new=False):
 **本節是 `h3-prompt-writing` skill 的 Full-Reference Mode（`references/ref-en.txt`）規則，
 已完整內嵌於本技能，執行時不需另外讀取或連結該 skill 的檔案。**
 
-傳入 MinMax H3（workflow 節點 138 `value`）的提示詞，**一律不得使用 Step 5a 的簡單串接文字**，
+傳入 MinMax H3 FastH3（workflow 節點 2 `value`）的提示詞，**一律不得使用 Step 5a 的簡單串接文字**，
 必須依下列六段式格式改寫，寫成 `storyboard_scenes[i]["minimax_prompt"]` 的內嵌字串。
 Grok（Step 5a）則繼續使用簡單串接文字，兩者提示詞內容不同、各自獨立。
 
@@ -252,19 +258,21 @@ except ImportError:
 地端伺服器不可連線），仍繼續執行，讓每個分鏡在真正嘗試時各自回報 `[FAIL]`，而非直接中止
 整支腳本。
 
-### Step 2：詢問生成品質
+### Step 2：詢問生成品質（僅影響 Grok 備援）
 
-在開始生成前，詢問使用者偏好的影片解析度：
+地端 MinMax H3 FastH3 引擎固定輸出 Full HD（1920x1080，16:9），不提供解析度選項。
+在開始生成前，詢問使用者偏好的 Grok 備援影片解析度：
 
-> 「請選擇影片生成品質：
+> 「地端引擎（FastH3）固定輸出 Full HD（1920x1080）。若某分鏡改用 Grok 備援，
+> 請選擇該備援的影片生成品質：
 > - **480p**（預設，生成速度較快，適合快速預覽）
 > - **720p**（較高畫質，適合正式輸出）
 >
 > 若未指定，預設使用 480p。」
 
 將使用者的選擇儲存為 `RESOLUTION`（值為 `"480p"` 或 `"720p"`），後續程式碼使用此變數。
-此變數同時驅動兩個引擎：Grok 的 `resolution` 欄位，以及 MinMax H3
-`ResolutionSelector` 節點的 `megapixels`（見 Step 6 的 `RESOLUTION_MEGAPIXELS` 對照表）。
+此變數**僅**驅動 Grok 引擎的 `resolution` 欄位；MinMax H3 FastH3 的 `ResolutionSelector`
+節點（`MM_NODE_RESOLUTION`）一律固定 `megapixels=2`（對應 Full HD），不讀取此變數。
 
 ### Step 3：解析輸入
 
@@ -342,7 +350,7 @@ any on-screen text must use Traditional Chinese characters only, no Simplified C
 - `detailed_description` 開場句帶入 Step 4 的 `STYLE_PREFIX` 語意，`[Shot 1]` 的動作描述須對應
   該分鏡的重點動作原文語意，畫面文字一律標註繁體中文原文。
 - 寫完後的完整六段式文字，整段作為 `storyboard_scenes[i]["minimax_prompt"]` 的字串值
-  （Step 6 範本中 `generate_via_minimax_h3()` 會直接把它填入 workflow 節點 138 的 `value`）。
+  （Step 6 範本中 `generate_via_minimax_h3()` 會直接把它填入 workflow 節點 2 的 `value`）。
 - 若該分鏡沒有對應的 `storyboard_panel_XX.jpg`（無圖卡），則不需撰寫 `minimax_prompt`
   （`generate_via_minimax_h3()` 會因找不到圖卡而直接跳過改走 Grok）。
 
@@ -378,7 +386,7 @@ any on-screen text must use Traditional Chinese characters only, no Simplified C
   才印出 `[RETRY]` 訊息並改呼叫 `generate_via_grok()`**。兩者都失敗才記為該分鏡 `failed`。
 - 每個 `storyboard_scenes` 項目若有對應圖卡，**必須**依 Step 5b 規則填入 `minimax_prompt`
   （H3 Prompt Writing skill · Full-Reference Mode 六段式文字）；`generate_via_minimax_h3()`
-  一律使用 `scene["minimax_prompt"]` 填入節點 138，**不得**使用 `build_text_prompt(scene)`
+  一律使用 `scene["minimax_prompt"]` 填入節點 2，**不得**使用 `build_text_prompt(scene)`
   （後者僅供 Grok 使用）
 
 **完整程式碼範本：**
@@ -453,7 +461,7 @@ def load_image_data_uri(path):
 # Ref2VA prompt (subject_definitions / summary / retention_analysis /
 # detailed_description / overall_soundscape / non_diegetic_music) written
 # per the embedded H3 Prompt Writing skill (Full-Reference Mode) rules.
-# minimax_prompt is used as-is for workflow node 138 and is NOT derived
+# minimax_prompt is used as-is for workflow node 2 and is NOT derived
 # from build_text_prompt() -- the two engines use different prompt formats.
 # -------------------------------------------------------------------
 storyboard_scenes = [
@@ -462,7 +470,7 @@ storyboard_scenes = [
 
 
 # =====================================================================
-# Engine 1 (primary): MinMax H3 via local/on-prem ComfyUI (R2V, turbo)
+# Engine 1 (primary): MinMax H3 FastH3 via local/on-prem ComfyUI (R2V)
 # =====================================================================
 
 # Read from environment -- ask the user for their on-prem ComfyUI server
@@ -471,25 +479,30 @@ storyboard_scenes = [
 # MinMax H3 engine for this run (see generate_via_minimax_h3 below).
 MINIMAX_SERVER_ADDRESS = os.environ.get("MINIMAX_SERVER_ADDRESS", "")
 
-# Node IDs from video_minimax_h3_r2v_turbo.json -- keep in sync if the
-# exported workflow is regenerated.
-MM_NODE_PROMPT = "138"       # PrimitiveStringMultiline -> inputs.value
-MM_NODE_R2V = "136"          # MiniMaxH3ReferenceToVideo
-MM_NODE_RESOLUTION = "115"   # ResolutionSelector -> inputs.aspect_ratio / megapixels
-MM_NODE_DURATION = "132"     # PrimitiveFloat (seconds) -> inputs.value
-MM_NODE_SEED = "129"         # RandomNoise -> inputs.noise_seed
-MM_NODE_SAVE_VIDEO = "92"    # SaveVideo -> inputs.filename_prefix
-MM_REF_IMAGE_NODE_0 = "137"  # LoadImage wired to ref_images.ref_image_0
+# Node IDs from fastH3_ref2va.json -- keep in sync if the exported workflow
+# is regenerated. This workflow runs the FastH3 distilled model
+# (fasth3_omniref_8step_pruned_int8_convrot.safetensors) through
+# BlockSparseAttention + ModelAttentionBackend and always targets Full HD
+# (1920x1080, 16:9) via the ResolutionSelector node.
+MM_NODE_PROMPT = "2"           # PrimitiveStringMultiline -> inputs.value
+MM_NODE_R2V = "11"             # MiniMaxH3ReferenceToVideo
+MM_NODE_RESOLUTION = "20"      # ResolutionSelector -> inputs.megapixels
+MM_NODE_DURATION = "17"        # PrimitiveFloat (seconds) -> inputs.value
+MM_NODE_SEED = "129"           # RandomNoise -> inputs.noise_seed
+MM_NODE_VIDEO_COMBINE = "135"  # VHS_VideoCombine -> inputs.filename_prefix
+MM_REF_IMAGE_NODE_0 = "214"    # LoadImage wired to ref_images.ref_image_0
 
-# Approximate megapixel targets for the ResolutionSelector node, matched to
-# the same RESOLUTION choice used by the Grok engine.
-RESOLUTION_MEGAPIXELS = {"480p": 0.3, "720p": 0.5}
+# Fixed megapixel target for Full HD (1920x1080) output. The MinMax H3
+# FastH3 engine always generates at this resolution; the user's RESOLUTION
+# choice (480p/720p, see Step 2) only applies to the Grok fallback below.
+MM_MEGAPIXELS_FHD = 2
 
-# Reference-to-Video workflow (video_minimax_h3_r2v_turbo.json), embedded so this
-# script has no external file dependency. Node 138's prompt and node 137's image
-# are placeholders overwritten per-scene at runtime; nodes 139/148/149/150 are
-# unused placeholder ref-image slots removed from the wiring before submission.
-MINIMAX_H3_WORKFLOW_JSON = r'''{"92":{"inputs":{"filename_prefix":"video/MiniMax_H3","format":"auto","format.codec":"auto","codec":"auto","video-preview":"","video":["130",0]},"class_type":"SaveVideo","_meta":{"title":"Save Video"}},"115":{"inputs":{"aspect_ratio":"16:9 (Widescreen)","megapixels":1,"multiple":32},"class_type":"ResolutionSelector","_meta":{"title":"Resolution Selector (Size)"}},"119":{"inputs":{"vae_name":"minimax_h3_video_vae_fp16.safetensors"},"class_type":"VAELoader","_meta":{"title":"Load VAE"}},"120":{"inputs":{"vae_name":"minimax_h3_audio_vae_fp32.safetensors"},"class_type":"VAELoader","_meta":{"title":"Load VAE"}},"121":{"inputs":{"samples":["125",0],"vae":["120",0]},"class_type":"VAEDecodeAudio","_meta":{"title":"VAE Decode Audio"}},"122":{"inputs":{"samples":["125",0],"vae":["119",0]},"class_type":"VAEDecode","_meta":{"title":"VAE Decode"}},"123":{"inputs":{"sampler_name":"res_multistep"},"class_type":"KSamplerSelect","_meta":{"title":"KSamplerSelect"}},"124":{"inputs":{"scheduler":"simple","steps":["142",0],"denoise":1,"model":["127",0]},"class_type":"BasicScheduler","_meta":{"title":"BasicScheduler"}},"125":{"inputs":{"noise":["129",0],"guider":["126",0],"sampler":["123",0],"sigmas":["124",0],"latent_image":["136",1]},"class_type":"SamplerCustomAdvanced","_meta":{"title":"SamplerCustomAdvanced"}},"126":{"inputs":{"model":["141",0],"conditioning":["136",0]},"class_type":"BasicGuider","_meta":{"title":"Basic Guider"}},"127":{"inputs":{"unet_name":"minimax_h3_ref2va_pruned_int8_convrot.safetensors","weight_dtype":"default"},"class_type":"UNETLoader","_meta":{"title":"Load Diffusion Model"}},"128":{"inputs":{"clip_name":"qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors","type":"minimax","device":"default"},"class_type":"CLIPLoader","_meta":{"title":"Load CLIP"}},"129":{"inputs":{"noise_seed":821150909694347},"class_type":"RandomNoise","_meta":{"title":"RandomNoise"}},"130":{"inputs":{"fps":24,"bit_depth":8,"color_space":"sRGB","images":["122",0],"audio":["121",0]},"class_type":"CreateVideo","_meta":{"title":"Create Video"}},"131":{"inputs":{"expression":"max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17","values.a":["132",0]},"class_type":"ComfyMathExpression","_meta":{"title":"Math Expression"}},"132":{"inputs":{"value":10},"class_type":"PrimitiveFloat","_meta":{"title":"Float (Duration)"}},"136":{"inputs":{"prompt":["138",0],"width":["115",0],"height":["115",1],"length":["131",1],"ref_image_size":"match","clip":["128",0],"vae":["119",0],"audio_vae":["120",0],"ref_images.ref_image_0":["137",0],"ref_images.ref_image_1":["139",0],"ref_images.ref_image_2":["148",0],"ref_images.ref_image_3":["149",0],"ref_images.ref_image_4":["150",0]},"class_type":"MiniMaxH3ReferenceToVideo","_meta":{"title":"MiniMax H3 Reference to Video"}},"137":{"inputs":{"image":"placeholder.jpg"},"class_type":"LoadImage","_meta":{"title":"Load Image"}},"138":{"inputs":{"value":"placeholder prompt - overwritten at runtime by scene['minimax_prompt']"},"class_type":"PrimitiveStringMultiline","_meta":{"title":"Input Text (Prompt)"}},"139":{"inputs":{"image":"placeholder.jpg"},"class_type":"LoadImage","_meta":{"title":"Load Image"}},"141":{"inputs":{"switch":["146",0],"on_false":["127",0],"on_true":["145",0]},"class_type":"ComfySwitchNode","_meta":{"title":"If/Else Switch (model)"}},"142":{"inputs":{"switch":["146",0],"on_false":["143",0],"on_true":["144",0]},"class_type":"ComfySwitchNode","_meta":{"title":"If/Else Switch (Steps)"}},"143":{"inputs":{"value":20},"class_type":"PrimitiveInt","_meta":{"title":"Int (Full)"}},"144":{"inputs":{"value":8},"class_type":"PrimitiveInt","_meta":{"title":"Int (Lightning LoRA)"}},"145":{"inputs":{"lora_name":"minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors","strength_model":1,"model":["127",0]},"class_type":"LoraLoaderModelOnly","_meta":{"title":"Load LoRA"}},"146":{"inputs":{"value":true},"class_type":"PrimitiveBoolean","_meta":{"title":"Boolean (Enable Lightning LoRA)"}},"148":{"inputs":{"image":"placeholder.jpg"},"class_type":"LoadImage","_meta":{"title":"Load Image"}},"149":{"inputs":{"image":"placeholder.jpg"},"class_type":"LoadImage","_meta":{"title":"Load Image"}},"150":{"inputs":{"image":"placeholder.jpg"},"class_type":"LoadImage","_meta":{"title":"Load Image"}}}'''
+# Reference-to-Video workflow (fastH3_ref2va.json), embedded so this script
+# has no external file dependency. Node 2's prompt and node 214's image are
+# placeholders overwritten per-scene at runtime. This workflow has only a
+# single reference-image slot (ref_image_0), already wired, so unlike the
+# older R2V Turbo workflow there are no unused ref-image slots to remove.
+MINIMAX_H3_WORKFLOW_JSON = r'''{"2":{"inputs":{"value":"placeholder prompt - overwritten at runtime by scene['minimax_prompt']"},"class_type":"PrimitiveStringMultiline","_meta":{"title":"提示词"}},"3":{"inputs":{"vae_name":"minimax_h3_video_vae_int8_convrot.safetensors"},"class_type":"VAELoader","_meta":{"title":"Load VAE"}},"4":{"inputs":{"vae_name":"minimax_h3_audio_vae_fp32.safetensors"},"class_type":"VAELoader","_meta":{"title":"Load VAE"}},"11":{"inputs":{"prompt":["2",0],"width":["20",0],"height":["20",1],"length":["19",1],"ref_image_size":"match","clip":["15",0],"vae":["3",0],"audio_vae":["4",0],"ref_images.ref_image_0":["214",0]},"class_type":"MiniMaxH3ReferenceToVideo","_meta":{"title":"MiniMax H3 Reference to Video"}},"15":{"inputs":{"clip_name":"qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors","type":"minimax","device":"default"},"class_type":"CLIPLoader","_meta":{"title":"Load CLIP"}},"17":{"inputs":{"value":6},"class_type":"PrimitiveFloat","_meta":{"title":"Float (Duration)"}},"19":{"inputs":{"expression":"max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17","values.a":["17",0]},"class_type":"ComfyMathExpression","_meta":{"title":"Math Expression"}},"20":{"inputs":{"aspect_ratio":"16:9 (Widescreen)","megapixels":2,"multiple":32},"class_type":"ResolutionSelector","_meta":{"title":"Resolution Selector (Size)-1pass"}},"30":{"inputs":{"unet_name":"fasth3_omniref_8step_pruned_int8_convrot.safetensors","weight_dtype":"default"},"class_type":"UNETLoader","_meta":{"title":"Load Diffusion Model"}},"122":{"inputs":{"model":["217",0],"conditioning":["11",0]},"class_type":"BasicGuider","_meta":{"title":"Basic Guider"}},"123":{"inputs":{"sampler_name":"euler"},"class_type":"KSamplerSelect","_meta":{"title":"KSamplerSelect"}},"124":{"inputs":{"scheduler":"simple","steps":8,"denoise":1,"model":["217",0]},"class_type":"BasicScheduler","_meta":{"title":"BasicScheduler"}},"125":{"inputs":{"noise":["129",0],"guider":["122",0],"sampler":["123",0],"sigmas":["124",0],"latent_image":["11",1]},"class_type":"SamplerCustomAdvanced","_meta":{"title":"SamplerCustomAdvanced"}},"129":{"inputs":{"noise_seed":549727985985675},"class_type":"RandomNoise","_meta":{"title":"RandomNoise"}},"131":{"inputs":{"samples":["125",1],"vae":["3",0]},"class_type":"VAEDecode","_meta":{"title":"VAE Decode"}},"133":{"inputs":{"samples":["125",1],"vae":["4",0]},"class_type":"VAEDecodeAudio","_meta":{"title":"VAE Decode Audio"}},"135":{"inputs":{"frame_rate":24,"loop_count":0,"filename_prefix":"minimaxh3","format":"video/h264-mp4","pix_fmt":"yuv420p","crf":19,"save_metadata":true,"trim_to_audio":false,"pingpong":false,"save_output":true,"images":["131",0],"audio":["133",0]},"class_type":"VHS_VideoCombine","_meta":{"title":"Video Combine 🎥🅥🅗🅢"}},"214":{"inputs":{"image":"placeholder.jpg"},"class_type":"LoadImage","_meta":{"title":"Load Image"}},"217":{"inputs":{"selection":"vsa","selection.keep_percent":10,"start_percent":0.2,"end_percent":1,"dense_blocks":"","min_tokens":12288,"extra_tokens":256,"sink_conditioning":"exact_kv_and_rows","verbose":false,"model":["221",0]},"class_type":"BlockSparseAttention","_meta":{"title":"Model Sparse Attention"}},"221":{"inputs":{"attention":"comfy kitchen attention","model":["30",0]},"class_type":"ModelAttentionBackend","_meta":{"title":"Model Attention Backend"}}}'''
 
 MINIMAX_H3_WORKFLOW_TEMPLATE = json.loads(MINIMAX_H3_WORKFLOW_JSON)
 
@@ -577,7 +590,7 @@ def minimax_download_outputs(prompt_id, output_path):
 
 
 def generate_via_minimax_h3(scene, panel_path, output_path):
-    """Try the local MinMax H3 engine. Returns True on success, False on any failure."""
+    """Try the local MinMax H3 FastH3 engine. Returns True on success, False on any failure."""
     if not MINIMAX_SERVER_ADDRESS:
         print("  [INFO] MinMax H3 skipped (MINIMAX_SERVER_ADDRESS is not set)")
         return False
@@ -593,20 +606,14 @@ def generate_via_minimax_h3(scene, panel_path, output_path):
 
     workflow = copy.deepcopy(MINIMAX_H3_WORKFLOW_TEMPLATE)
     workflow[MM_NODE_PROMPT]["inputs"]["value"] = minimax_prompt
-    workflow[MM_NODE_RESOLUTION]["inputs"]["megapixels"] = RESOLUTION_MEGAPIXELS.get(RESOLUTION, 0.3)
+    workflow[MM_NODE_RESOLUTION]["inputs"]["megapixels"] = MM_MEGAPIXELS_FHD
     workflow[MM_NODE_DURATION]["inputs"]["value"] = 6
     workflow[MM_NODE_SEED]["inputs"]["noise_seed"] = random.randint(0, 2**53 - 1)
-    workflow[MM_NODE_SAVE_VIDEO]["inputs"]["filename_prefix"] = f"storyboard/scene_{scene['index']:02d}"
-
-    r2v_inputs = workflow[MM_NODE_R2V]["inputs"]
-    for key in list(r2v_inputs):
-        if key.startswith("ref_images.ref_image_"):
-            del r2v_inputs[key]
+    workflow[MM_NODE_VIDEO_COMBINE]["inputs"]["filename_prefix"] = f"storyboard/scene_{scene['index']:02d}"
 
     try:
         server_filename = minimax_upload_image(panel_path)
         workflow[MM_REF_IMAGE_NODE_0]["inputs"]["image"] = server_filename
-        r2v_inputs["ref_images.ref_image_0"] = [MM_REF_IMAGE_NODE_0, 0]
 
         client_id = str(uuid.uuid4())
         ws = websocket.WebSocket()
@@ -816,7 +823,8 @@ for r in results:
 依 Step 5b 規則另外填入 `minimax_prompt`（H3 Prompt Writing skill · Full-Reference Mode
 六段式文字，逐鏡由你親自撰寫，不可留空或用簡單串接文字代替，且須已在 Step 5b 於對話中
 原樣輸出供使用者確認過）。並依使用者選擇設定 `RESOLUTION`（`"480p"` 或 `"720p"`，
-未指定則保持預設 `"480p"`）。`MINIMAX_SERVER_ADDRESS` 一律讀取環境變數，若 Step 1 尚未取得
+未指定則保持預設 `"480p"`；此設定僅影響 Grok 備援，地端 MinMax H3 FastH3 一律固定輸出
+Full HD 1920x1080）。`MINIMAX_SERVER_ADDRESS` 一律讀取環境變數，若 Step 1 尚未取得
 使用者提供的地端 ComfyUI 伺服器位址，執行前務必再次詢問使用者並設定該環境變數
 （例如 `export MINIMAX_SERVER_ADDRESS="192.168.x.x:8188"`，或使用者實際的內網位址），
 **不得**在 `storyboard_video.py` 中寫死特定位址；使用者若表示沒有地端伺服器，則保持
@@ -841,7 +849,7 @@ python storyboard/storyboard_video.py
 
 | 檔案 | 說明 |
 |---|---|
-| `storyboard_video_01.mp4` | 分鏡 1 影片（MinMax H3 或 Grok 生成，依實際成功引擎而定） |
+| `storyboard_video_01.mp4` | 分鏡 1 影片（MinMax H3 FastH3 生成則為 Full HD 1920x1080，Grok 備援則依 `RESOLUTION` 為 480p/720p，依實際成功引擎而定） |
 | `storyboard_video_02.mp4` | 分鏡 2 影片 |
 | … | … |
 | `storyboard_video_N.mp4` | 分鏡 N 影片 |
@@ -855,7 +863,7 @@ python storyboard/storyboard_video.py
 1. **雙引擎優先序**：每個分鏡一律先嘗試地端 MinMax H3，失敗才 fallback 呼叫 Grok；兩者都失敗才記為該分鏡失敗
 2. **無 Emoji 日誌與註解**：Python 程式碼中的所有 `print()` 輸出與註解，一律不得含有 Emoji
 3. **繁體中文強制**：prompt 中明確要求畫面文字使用繁體中文，禁用簡體字
-4. **圖卡優先**：有 `storyboard_panel_XX.jpg` 時，MinMax H3 以 `ref_images.ref_image_0` 頂層 wiring、Grok 以 `"image": {"url": "data:image/jpeg;base64,..."}` 欄位送出；Grok 422 錯誤時自動退為純文字備援
+4. **圖卡優先**：有 `storyboard_panel_XX.jpg` 時，MinMax H3 以 `ref_images.ref_image_0` 頂層 wiring、Grok 以 `"image": {"url": "data:image/jpeg;base64,..."}` 欄位送出；Grok 422 錯誤時自動退為純文字備援。地端 MinMax H3 FastH3 一律輸出 Full HD（1920x1080，16:9），不受使用者 480p/720p 選擇影響，該選擇僅用於 Grok 備援
 5. **雙提示詞格式**：MinMax H3 與 Grok 使用不同格式的提示詞——MinMax H3 一律用 H3 Prompt Writing
    skill（Full-Reference Mode，本文件已內嵌完整規則）六段式 `minimax_prompt`，Grok 一律用簡單串接的
    `build_text_prompt()`；兩者不得混用或互相取代
@@ -880,5 +888,6 @@ python storyboard/storyboard_video.py
 > 建議先執行 storyboard-style 技能建立共用設計系統，重新生成後圖卡與影片會套用同一套風格。」
 
 若某些分鏡最終是由 Grok 產生（MinMax H3 該鏡失敗），額外提醒使用者：
-> 「分鏡 N 因地端 MinMax H3 無法完成（詳見執行日誌的 [RETRY] 訊息），已改用 Grok 生成，
-> 畫面風格可能與 MinMax H3 產出的分鏡略有差異，如需重試地端引擎請確認 ComfyUI 伺服器狀態後重新執行。」
+> 「分鏡 N 因地端 MinMax H3（FastH3）無法完成（詳見執行日誌的 [RETRY] 訊息），已改用 Grok 生成，
+> 解析度為 {RESOLUTION}（而非地端引擎固定的 Full HD），畫面風格可能也與 MinMax H3 產出的分鏡
+> 略有差異，如需重試地端引擎請確認 ComfyUI 伺服器狀態後重新執行。」
