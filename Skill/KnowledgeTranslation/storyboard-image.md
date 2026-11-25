@@ -141,11 +141,14 @@ else:
 [CHARACTER] same protagonist design across all frames if applicable
 [TEXT_LANGUAGE] all visible text labels must be written in Traditional Chinese characters (繁體中文), never Simplified Chinese
 [COMPOSITION] image-dominant layout, minimal text overlay, clear visual hierarchy
+[TEXT_STYLE] any text rendered inside the image must be short title/label words only (2-6 characters per label), large and legible; never render descriptive sentences, captions, or small-font paragraphs inside the image — narration and detailed description belong only in the storyboard script text, not on the image itself
 [QUALITY] high detail, 2K resolution, sharp edges
 [REALISM] when reference photo(s) are attached: preserve the real scene's lighting, materials, and object appearance faithfully; HUD graphics are a semi-transparent overlay layer on top, not a full repaint into illustration/cartoon style
 ```
 
 在生成每個分鏡的個別 Prompt 時，**前綴加入全局 Style Prompt**，再接續該分鏡的畫面構圖與重點動作描述（翻譯為英文）。
+畫面內若需要文字（如 HUD 標籤、面板標題），僅能以精簡標題式詞彙呈現（如「偵測完成」「資料同步中」），字體須夠大且清晰；
+**禁止**在圖片中生成敘述性的完整句子或小字體說明文字，詳細描述只存在於分鏡腳本文字中，不得畫入圖面。
 若該分鏡附有參考照片，另外附加一段指示：「以參考照片為場景、構圖與物件位置基礎，真實感優先，HUD 僅作為疊加層，不得將整個場景重繪成插畫」；
 若該分鏡沒有參考照片，則附加「維持半寫實科技渲染，避免扁平插畫/漫畫感」的提示。
 
@@ -242,7 +245,9 @@ else:
         "image-dominant composition with minimal text overlay, clear visual hierarchy, "
         "all visible text labels in Traditional Chinese characters (繁體中文) only, "
         "never use Simplified Chinese, high detail, 2K resolution, sharp edges, "
-        "16:9 aspect ratio."
+        "16:9 aspect ratio. Any text rendered inside the image must be short title/label "
+        "words only (2-6 characters), large and legible; never render descriptive full "
+        "sentences, captions, or small-font paragraphs inside the image."
     )
 
 # Appended when a scene has reference photo(s): keeps the real scene's realism and
@@ -279,7 +284,9 @@ def build_prompt(scene):
         f"Scene: {scene['composition']} "
         f"Action: {scene['action']} "
         f"Style notes: image-centric storyboard panel, no narration text, "
-        f"if any label or sign appears in the image use Traditional Chinese only."
+        f"if any label or sign appears in the image use Traditional Chinese only, "
+        f"keep it to a short title word (2-6 characters), never a descriptive sentence "
+        f"or small-font caption."
     )
     if scene.get("references"):
         text += REFERENCE_INSTRUCTION
@@ -424,11 +431,10 @@ def verify_traditional_chinese(img):
     )
 
     if ENGINE == "gemini":
-        # NOTE: "gemini-3.1-flash" is not a valid model id on the current API
-        # (404 NOT_FOUND). Use "gemini-flash-latest", which always resolves to a
-        # current flash-tier text+vision model.
+        # Reuse the same image model for Vision verification (image+text input,
+        # text output) instead of a separate text-only model id.
         response = client.models.generate_content(
-            model="gemini-flash-latest",
+            model="gemini-3.1-flash-image",
             contents=[
                 verify_prompt,
                 {
@@ -637,7 +643,7 @@ Grid 排列規則：**由上到下、由左至右**，每列 3 張（3、6、9�
 | 項目 | Gemini（預設） | OpenAI（備選） |
 |---|---|---|
 | 模型 | `gemini-3.1-flash-image` | `gpt-image-2` |
-| 驗證模型 | `gemini-flash-latest`（Vision） | `gpt-4o`（Vision） |
+| 驗證模型 | `gemini-3.1-flash-image`（Vision） | `gpt-4o`（Vision） |
 | API Key 環境變數 | `GOOGLE_API_KEY` | `OPENAI_API_KEY` |
 | Python 套件 | `google-genai` | `openai` |
 | 輸出解析度 | 2K（16:9） | 2K（2048×1152，16:9） |
@@ -660,6 +666,7 @@ Grid 排列規則：**由上到下、由左至右**，每列 3 張（3、6、9�
 | 旁白不入圖 | Prompt 明確要求 no narration text，旁白僅存於腳本文字 |
 | 繁體中文驗證 | 每張圖由 Vision 模型判斷，含簡體字或亂碼則重新生成，至多 3 次 |
 | 圖以圖為主 | Prompt 強調 image-dominant，僅允許畫面內自然出現的標籤/標示以繁體中文呈現 |
+| 文字以標題為主 | 畫面內文字僅限精簡標題/標籤詞彙（2-6字），字體大且清晰；禁止生成敘述性完整句子或小字體說明文字，詳細描述僅存於分鏡腳本文字 |
 | 無 Emoji 日誌 | Python 腳本所有 print 輸出不含 Emoji 字元 |
 | JPEG 輸出 | 所有圖片以 JPEG 格式儲存，quality=92 |
 | 檔名對接 | 每個分鏡輸出乾淨圖 `storyboard_panel_XX.jpg`（供 storyboard-video）與含標題圖 `frame_XX_標題.jpg`（供檢視／Grid）；panel 不含標題列 |
